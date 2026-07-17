@@ -18,6 +18,8 @@ class AppColors {
   static const List<Color> blueGradient = [Color(0xFF064789), Color(0xFF427AA1)];
   static const List<Color> greenGradient = [Color(0xFF92AC86), Color(0xFFBBCCB4)];
   static const List<Color> darkGreenGradient = [Color(0xFF36A773), Color(0xFF8BC53F)];
+  static const List<Color> cyanGradient = [Color(0xFF5D77F9), Color(0xFFABC4FF)];
+  static const List<Color> aquaGradient = [Color(0xFF5A999E), Color(0xFF005690)];
 
   static const Color availableBorder = Color(0xFF8BC53F);
   static const Color occupiedBorder = Color(0xFFFFFF00);

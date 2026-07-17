@@ -16,4 +16,8 @@ class BenefitApi {
         .map((e) => Benefit.fromJson(e as Map<String, dynamic>))
         .toList();
   }
+
+  Future<void> activate(Benefit benefit, int dni) async {
+    await _dio.post('${benefit.self}/activate', data: {'dni': dni});
+  }
 }

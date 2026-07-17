@@ -1,7 +1,8 @@
 import 'package:dio/dio.dart';
+import 'package:jwt_decoder/jwt_decoder.dart';
+
 import '../models/auth_tokens.dart';
 import '../models/auth_data.dart';
-import 'package:jwt_decoder/jwt_decoder.dart';
 
 class AuthApi {
   final Dio _dio;
@@ -16,12 +17,11 @@ class AuthApi {
     return AuthTokens.fromJson(response.data as Map<String, dynamic>);
   }
 
-  Future<AuthTokens> signUp(String email, String password) async {
+  Future<void> signUp(String email, String password) async {
     await _dio.post(
       '/auth/signup',
       data: {'email': email, 'password': password},
     );
-    return signIn(email, password);
   }
 
   Future<AuthTokens> refreshToken(String refreshToken) async {
@@ -32,6 +32,60 @@ class AuthApi {
       ),
     );
     return AuthTokens.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  Future<void> sendEmailVerification(String email) async {
+    await _dio.post(
+      '/auth/verify-email',
+      data: {'email': email},
+    );
+  }
+
+  Future<void> confirmEmailVerification(String email, String code) async {
+    await _dio.post(
+      '/auth/verify-email/confirm',
+      data: {'email': email, 'code': code},
+    );
+  }
+
+  Future<void> sendPasswordReset(String email) async {
+    await _dio.post(
+      '/auth/reset-password',
+      data: {'email': email},
+    );
+  }
+
+  Future<void> checkPasswordReset(String email, String code) async {
+    await _dio.put(
+      '/auth/reset-password/check',
+      data: {'email': email, 'code': code},
+    );
+  }
+
+  Future<void> confirmPasswordReset(
+    String email,
+    String code,
+    String password,
+  ) async {
+    await _dio.post(
+      '/auth/reset-password/confirm',
+      data: {'email': email, 'code': code, 'password': password},
+    );
+  }
+
+  Future<void> changePassword(
+    String email,
+    String password,
+    String oldPassword,
+  ) async {
+    await _dio.post(
+      '/auth/change-password',
+      data: {
+        'email': email,
+        'password': password,
+        'oldPassword': oldPassword,
+      },
+    );
   }
 
   static AuthData decodeToken(String accessToken) {

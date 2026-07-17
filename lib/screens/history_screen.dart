@@ -1,306 +1,259 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:intl/intl.dart';
-import '../api/api_client.dart';
-import '../providers/auth_provider.dart';
-import '../models/charging_session.dart';
-import '../theme/colors.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class HistoryScreen extends StatefulWidget {
+import '../models/charging_session.dart';
+import '../models/pagination.dart';
+import '../providers/auth_provider.dart';
+import '../providers/message_provider.dart';
+import '../theme/colors.dart';
+import '../theme/dimensions.dart';
+import '../theme/text_styles.dart';
+import '../widgets/app_button.dart';
+import '../widgets/app_text.dart';
+import '../widgets/icon_header.dart';
+
+class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
 
   @override
-  State<HistoryScreen> createState() => _HistoryScreenState();
+  ConsumerState<HistoryScreen> createState() => _HistoryScreenState();
 }
 
-class _HistoryScreenState extends State<HistoryScreen> {
-  List<ChargingSession> _sessions = [];
-  bool _loading = true;
+class _HistoryScreenState extends ConsumerState<HistoryScreen> {
+  final List<Pagination<ChargingSession>> _pages = [];
+  bool _refreshing = false;
+  bool _loadingMore = false;
+
+  List<ChargingSession> get _sessions =>
+      _pages.expand((p) => p.data).toList();
 
   @override
   void initState() {
     super.initState();
-    _loadSessions();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refresh());
   }
 
-  Future<void> _loadSessions() async {
-    final auth = context.read<AuthProvider>();
-    final api = context.read<ApiClient>();
-    if (auth.userRef == null) return;
+  Future<void> _refresh() async {
+    setState(() => _refreshing = true);
+    final auth = ref.read(authProvider);
+    final message = ref.read(messageProvider.notifier);
     try {
-      final result = await api.sessionApi.getPaged(
-        user: auth.userRef,
-        pageSize: 50,
-      );
+      final page = await ref.read(apiClientProvider).sessionApi.getPaged(
+            user: auth.userRef,
+            state: 'finished',
+          );
       if (mounted) {
-        setState(() {
-          _sessions = result.data;
-          _loading = false;
-        });
+        setState(() => _pages
+          ..clear()
+          ..add(page));
       }
-    } catch (e) {
-      if (mounted) setState(() => _loading = false);
+    } catch (_) {
+      message.showError('error.connection'.tr());
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: AppColors.blueGradient,
-        ),
-      ),
-      child: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildHeader(),
-            Expanded(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-                  : _sessions.isEmpty
-                      ? _buildEmptyState()
-                      : RefreshIndicator(
-                          onRefresh: _loadSessions,
-                          child: _buildSessionList(),
-                        ),
-            ),
-          ],
-        ),
-      ),
-    );
+  Future<void> _loadMore() async {
+    setState(() => _loadingMore = true);
+    final auth = ref.read(authProvider);
+    final message = ref.read(messageProvider.notifier);
+    try {
+      final last = _pages.last;
+      final page = await ref.read(apiClientProvider).sessionApi.getPaged(
+            user: auth.userRef,
+            state: 'finished',
+            page: last.page + 1,
+            pageSize: last.pageSize,
+          );
+      if (mounted) setState(() => _pages.add(page));
+    } catch (_) {
+      message.showError('error.connection'.tr());
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
+    }
   }
 
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Historial',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '${_sessions.length} sesiones de carga',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.6),
-              fontSize: 14,
-            ),
-          ),
-        ],
-      ),
-    );
+  List<_Section> get _sections {
+    final result = <_Section>[];
+    for (final session in _sessions) {
+      final date = DateTime.tryParse(session.timeStart);
+      final key = date != null
+          ? DateFormat('yyyy-MM-dd').format(date)
+          : session.timeStart;
+      final index = result.indexWhere((s) => s.dateKey == key);
+      if (index != -1) {
+        result[index].data.add(session);
+      } else {
+        result.add(_Section(dateKey: key, data: [session]));
+      }
+    }
+    return result;
   }
-
-  Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.history,
-              color: Colors.white.withValues(alpha: 0.4),
-              size: 40,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Sin sesiones',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.7),
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Tus sesiones de carga aparecerán aquí',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.5),
-              fontSize: 14,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSessionList() {
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      itemCount: _sessions.length,
-      itemBuilder: (context, index) {
-        final session = _sessions[index];
-        return _SessionCard(session: session);
-      },
-    );
-  }
-}
-
-class _SessionCard extends StatelessWidget {
-  final ChargingSession session;
-
-  const _SessionCard({required this.session});
 
   @override
   Widget build(BuildContext context) {
-    final date = DateTime.tryParse(session.timeStart);
-    final formattedDate = date != null ? DateFormat('dd MMM yyyy').format(date) : '';
-    final formattedTime = date != null ? DateFormat('HH:mm').format(date) : '';
-    final duration = session.timeStop != null
-        ? _formatDuration(
-            DateTime.tryParse(session.timeStop!)?.difference(
-              DateTime.tryParse(session.timeStart) ?? DateTime.now(),
-            ))
-        : 'En curso';
+    final locale = context.locale.toString();
+    final sessions = _sessions;
+    final total = _pages.isNotEmpty ? _pages.first.count : 0;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.1),
-          width: 1,
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: AppColors.blueGradient,
+            ),
+          ),
         ),
-      ),
-      child: Column(
-        children: [
-          Row(
+        SafeArea(
+          bottom: false,
+          child: Column(
             children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(
-                  Icons.ev_station,
-                  color: AppColors.primary,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 12),
+              const IconHeader(),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      session.location.name.isNotEmpty ? session.location.name : session.serial,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
+                child: RefreshIndicator(
+                  onRefresh: _refresh,
+                  color: AppColors.primary,
+                  backgroundColor: AppColors.background,
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppDimensions.paddingHorizontal,
+                    ).copyWith(bottom: AppDimensions.paddingBottom),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 24),
+                        child: AppText(
+                          'page.history.title'.tr(),
+                          type: AppTextType.subtitleBold,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '$formattedDate • $formattedTime',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.6),
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: session.timeStop != null
-                      ? AppColors.success.withValues(alpha: 0.2)
-                      : AppColors.primary.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  session.timeStop != null ? 'Completada' : 'En curso',
-                  style: TextStyle(
-                    color: session.timeStop != null ? AppColors.success : AppColors.primary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
+                      for (final section in _sections) ...[
+                        AppText(_formatSectionDate(section.dateKey, locale)),
+                        for (final session in section.data)
+                          _SessionCard(session: session, locale: locale),
+                      ],
+                      if (sessions.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 16),
+                          child: AppButton(
+                            type: AppButtonType.secondary,
+                            loading: _loadingMore,
+                            disabled: total == sessions.length,
+                            onPressed: _loadMore,
+                            child: AppText(
+                              'common.load-more'.tr(),
+                              type: AppTextType.subtitle,
+                            ),
+                          ),
+                        ),
+                      if (sessions.isEmpty && !_refreshing)
+                        AppText('page.history.empty'.tr()),
+                    ],
                   ),
                 ),
               ),
             ],
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.05),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _buildStatItem(Icons.bolt, '${session.energyKwh.toStringAsFixed(1)} kWh', 'Energía'),
-                Container(width: 1, height: 30, color: Colors.white.withValues(alpha: 0.1)),
-                _buildStatItem(Icons.access_time, duration, 'Duración'),
-                Container(width: 1, height: 30, color: Colors.white.withValues(alpha: 0.1)),
-                _buildStatItem(Icons.payments_outlined, _formatCredits(session), 'Costo'),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatItem(IconData icon, String value, String label) {
-    return Column(
-      children: [
-        Icon(icon, color: AppColors.primary, size: 18),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          label,
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.5),
-            fontSize: 10,
           ),
         ),
       ],
     );
   }
 
-  String _formatCredits(ChargingSession session) {
-    if (session.credits > 0) {
-      return '${session.credits} créditos';
-    }
-    return '--';
+  String _formatSectionDate(String key, String locale) {
+    final date = DateTime.tryParse(key);
+    if (date == null) return key;
+    return DateFormat.yMMMMd(locale).format(date);
   }
+}
 
-  String _formatDuration(Duration? d) {
-    if (d == null) return '--';
-    if (d.inHours > 0) {
-      return '${d.inHours}h ${d.inMinutes % 60}m';
-    }
-    return '${d.inMinutes} min';
+class _Section {
+  final String dateKey;
+  final List<ChargingSession> data;
+
+  _Section({required this.dateKey, required this.data});
+}
+
+class _SessionCard extends StatelessWidget {
+  final ChargingSession session;
+  final String locale;
+
+  const _SessionCard({required this.session, required this.locale});
+
+  @override
+  Widget build(BuildContext context) {
+    final start = DateTime.tryParse(session.timeStart);
+    final stop =
+        session.timeStop != null ? DateTime.tryParse(session.timeStop!) : null;
+    final duration = (start != null && stop != null)
+        ? stop.difference(start)
+        : Duration.zero;
+    final kwh = NumberFormat.decimalPattern(locale)
+        .format((session.energyWh / 1000).round());
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.highlight,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: AppText(
+                  session.location.name,
+                  type: AppTextType.defaultBold,
+                  color: AppColors.textDark,
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  AppText(
+                    '$kwh kWh',
+                    type: AppTextType.defaultBold,
+                    color: AppColors.textDark,
+                  ),
+                  AppText(
+                    start != null && stop != null
+                        ? '${DateFormat('HH:mm').format(start)} - ${DateFormat('HH:mm').format(stop)}hs'
+                        : '',
+                    type: AppTextType.hint,
+                    color: AppColors.textDark,
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: AppText(
+                  session.location.address,
+                  type: AppTextType.hint,
+                  color: const Color(0x90000000),
+                ),
+              ),
+              AppText(
+                '${duration.inHours}h ${duration.inMinutes % 60}m',
+                type: AppTextType.hint,
+                color: AppColors.textDark,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }

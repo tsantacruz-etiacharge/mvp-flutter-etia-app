@@ -1,573 +1,552 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
+
+import 'package:easy_localization/easy_localization.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:provider/provider.dart';
 
-import '../api/api_client.dart';
-import '../providers/auth_provider.dart';
 import '../models/company_charger.dart';
+import '../models/company_location.dart';
+import '../models/week_time.dart';
+import '../providers/auth_provider.dart';
+import '../providers/message_provider.dart';
 import '../theme/colors.dart';
-import 'location_screen.dart';
+import '../theme/dimensions.dart';
+import '../theme/text_styles.dart';
+import '../utils/maps.dart';
+import '../utils/week_time.dart';
+import '../widgets/app_text.dart';
+import '../widgets/connector_info.dart';
+import '../widgets/horizontal_separator.dart';
 
-class MapScreen extends StatefulWidget {
+Color _statusColor(ChargerStatus status) {
+  switch (status) {
+    case ChargerStatus.unavailable:
+      return AppColors.highlight;
+    case ChargerStatus.available:
+      return AppColors.primary;
+    case ChargerStatus.occupied:
+      return AppColors.warning;
+  }
+}
+
+class MapScreen extends ConsumerStatefulWidget {
   const MapScreen({super.key});
 
   @override
-  State<MapScreen> createState() => _MapScreenState();
+  ConsumerState<MapScreen> createState() => _MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> {
-  GoogleMapController? _mapController;
-  CompanyCharger? _selectedCharger;
-  final Set<Marker> _markers = {};
-  String? _mapStyle;
-  bool _loadingChargers = true;
+class _MapScreenState extends ConsumerState<MapScreen> {
+  static const LatLng _initialCoords = LatLng(-34.60376, -58.38162);
 
-  static const CameraPosition _initialPosition = CameraPosition(
-    target: LatLng(-34.60376, -58.38162),
-    zoom: 14.0,
-  );
+  GoogleMapController? _mapController;
+  String? _mapStyle;
+
+  final Set<Marker> _markers = {};
+  final Map<String, BitmapDescriptor> _iconCache = {};
+  BitmapDescriptor? _userIcon;
+
+  List<CompanyCharger> _chargers = const [];
+  CompanyCharger? _selectedCharger;
+  bool _showCharger = false;
+
+  LatLng _cameraTarget = _initialCoords;
+  LatLng? _userLocation;
+  bool _programmaticMove = false;
+  Timer? _locationTimer;
 
   @override
   void initState() {
     super.initState();
-    _loadMapStyle();
+    _init();
   }
 
-  Future<void> _loadMapStyle() async {
-    final json = await rootBundle.loadString('lib/data/map_style.json');
-    if (mounted) {
-      setState(() => _mapStyle = json);
-      _fetchChargers(
-        _initialPosition.target.latitude,
-        _initialPosition.target.longitude,
-      );
+  @override
+  void dispose() {
+    _locationTimer?.cancel();
+    _mapController?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _init() async {
+    _mapStyle = await rootBundle.loadString('lib/data/map_style.json');
+    _userIcon = await _createUserMarker();
+    if (mounted) setState(() {});
+    _fetchChargers(_initialCoords);
+    _startLiveLocation();
+  }
+
+  Future<void> _startLiveLocation() async {
+    final permission = await Geolocator.checkPermission();
+    var granted = permission == LocationPermission.always ||
+        permission == LocationPermission.whileInUse;
+    if (!granted) {
+      final requested = await Geolocator.requestPermission();
+      granted = requested == LocationPermission.always ||
+          requested == LocationPermission.whileInUse;
     }
+    if (!granted) return;
+
+    final last = await Geolocator.getLastKnownPosition();
+    if (last != null) {
+      _setUserLocation(last, animate: true);
+    }
+
+    _locationTimer =
+        Timer.periodic(const Duration(seconds: 5), (_) => _updateLocation());
   }
 
-  Future<void> _fetchChargers(double lat, double lng) async {
-    final auth = context.read<AuthProvider>();
-    final api = context.read<ApiClient>();
+  Future<void> _updateLocation() async {
+    final last = await Geolocator.getLastKnownPosition();
+    if (last != null) _setUserLocation(last, animate: false);
+  }
+
+  void _setUserLocation(Position position, {required bool animate}) {
+    final coords = LatLng(position.latitude, position.longitude);
+    setState(() => _userLocation = coords);
+    _rebuildMarkers();
+    if (animate) _animateToLocation(coords);
+  }
+
+  Future<void> _fetchChargers(LatLng origin) async {
+    final auth = ref.read(authProvider);
+    final api = ref.read(apiClientProvider);
+    final message = ref.read(messageProvider.notifier);
     try {
       final chargers = await api.companyChargerApi.getClosest(
-        lat: lat,
-        lng: lng,
+        lat: origin.latitude,
+        lng: origin.longitude,
         showPublic: true,
         user: auth.userRef,
       );
-      if (!mounted) return;
+      _chargers = chargers.where((c) => c.iconUrl != null).toList();
+      await _rebuildMarkers();
+    } on Object catch (e) {
+      message.showError(
+        (e is Exception ? 'error.unexpected' : 'error.connection').tr(),
+      );
+    }
+  }
 
-      final markers = <Marker>{};
-      for (final charger in chargers) {
-        final marker = Marker(
+  Future<void> _rebuildMarkers() async {
+    final markers = <Marker>{};
+
+    for (final charger in _chargers) {
+      final status = charger.status;
+      final icon = await _chargerIcon(charger.iconUrl!, status);
+      markers.add(
+        Marker(
           markerId: MarkerId(charger.self),
           position: LatLng(charger.lat, charger.lng),
-          icon: await _createPinMarker(charger.status),
-          anchor: const Offset(0.5, 1.0),
-          onTap: () {
-            setState(() => _selectedCharger = charger);
-            _mapController?.animateCamera(
-              CameraUpdate.newCameraPosition(
-                CameraPosition(
-                  target: LatLng(charger.lat - 0.0015, charger.lng),
-                  zoom: 16.0,
-                ),
-              ),
-            );
-          },
-        );
-        markers.add(marker);
-      }
-
-      setState(() {
-        _markers.clear();
-        _markers.addAll(markers);
-        _loadingChargers = false;
-      });
-    } catch (e) {
-      if (mounted) setState(() => _loadingChargers = false);
+          icon: icon,
+          anchor: const Offset(0.5, 0.5),
+          zIndexInt: status == ChargerStatus.available ? 1 : 0,
+          onTap: () => _onMarkerTap(charger),
+        ),
+      );
     }
+
+    if (_userLocation != null && _userIcon != null) {
+      markers.add(
+        Marker(
+          markerId: const MarkerId('__user__'),
+          position: _userLocation!,
+          icon: _userIcon!,
+          anchor: const Offset(0.5, 0.5),
+          zIndexInt: 2,
+          consumeTapEvents: false,
+        ),
+      );
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _markers
+        ..clear()
+        ..addAll(markers);
+    });
   }
 
-  Future<BitmapDescriptor> _createPinMarker(ChargerStatus status) async {
-    final color = _statusColor(status);
+  void _onMarkerTap(CompanyCharger charger) {
+    setState(() {
+      _selectedCharger = charger;
+      _showCharger = true;
+    });
+    _animateToMarker(LatLng(charger.lat, charger.lng));
+  }
+
+  double get _ratio =>
+      WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
+
+  Future<BitmapDescriptor> _chargerIcon(
+    String iconUrl,
+    ChargerStatus status,
+  ) async {
+    final key = '$iconUrl|${status.name}';
+    final cached = _iconCache[key];
+    if (cached != null) return cached;
+
+    final descriptor = await _createChargerMarker(iconUrl, status);
+    _iconCache[key] = descriptor;
+    return descriptor;
+  }
+
+  Future<BitmapDescriptor> _createChargerMarker(
+    String iconUrl,
+    ChargerStatus status,
+  ) async {
+    final ratio = _ratio;
+    const size = 39.0;
+    final dim = size * ratio;
+    final border = 2.5 * ratio;
+    final padding = 2.0 * ratio;
+
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
-    const width = 64.0;
-    const height = 80.0;
+    final center = Offset(dim / 2, dim / 2);
 
-    final shadowPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.25)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+    final bg = Paint()..color = AppColors.background;
+    canvas.drawCircle(center, dim / 2, bg);
 
-    final pinPath = Path();
-    pinPath.moveTo(width / 2, height - 8);
-    pinPath.quadraticBezierTo(width / 2 + 18, height - 28, width / 2 + 20, height - 48);
-    pinPath.quadraticBezierTo(width / 2 + 22, height - 72, width / 2, height - 76);
-    pinPath.quadraticBezierTo(width / 2 - 22, height - 72, width / 2 - 20, height - 48);
-    pinPath.quadraticBezierTo(width / 2 - 18, height - 28, width / 2, height - 8);
-    pinPath.close();
+    final ring = Paint()
+      ..color = _statusColor(status)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = border;
+    canvas.drawCircle(center, dim / 2 - border / 2, ring);
 
-    canvas.drawPath(pinPath.shift(const Offset(2, 2)), shadowPaint);
+    ui.Image? image;
+    try {
+      image = await _loadNetworkImage(iconUrl);
+    } catch (_) {
+      image = null;
+    }
 
-    final pinPaint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-    canvas.drawPath(pinPath, pinPaint);
-
-    final innerCirclePaint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.fill;
-    canvas.drawCircle(Offset(width / 2, height - 50), 12, innerCirclePaint);
-
-    final iconPaint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill
-      ..strokeWidth = 2.0
-      ..strokeCap = StrokeCap.round;
-
-    final boltPath = Path();
-    boltPath.moveTo(width / 2 + 1, height - 58);
-    boltPath.lineTo(width / 2 - 4, height - 50);
-    boltPath.lineTo(width / 2 - 1, height - 50);
-    boltPath.lineTo(width / 2 + 1, height - 44);
-    boltPath.lineTo(width / 2 - 4, height - 44);
-    boltPath.lineTo(width / 2 - 1, height - 50);
-    boltPath.close();
-
-    final boltFinal = Path();
-    boltFinal.moveTo(width / 2, height - 58);
-    boltFinal.lineTo(width / 2 - 4, height - 49);
-    boltFinal.lineTo(width / 2 - 1, height - 49);
-    boltFinal.lineTo(width / 2 + 1, height - 43);
-    boltFinal.lineTo(width / 2 - 3, height - 43);
-    boltFinal.lineTo(width / 2, height - 49);
-    boltFinal.lineTo(width / 2 + 4, height - 49);
-    boltFinal.close();
-    canvas.drawPath(boltFinal, iconPaint);
+    if (image != null) {
+      final inner = dim - (border + padding) * 2;
+      final rect = Rect.fromCenter(center: center, width: inner, height: inner);
+      canvas.save();
+      canvas.clipPath(Path()..addOval(rect));
+      paintImage(
+        canvas: canvas,
+        rect: rect,
+        image: image,
+        fit: BoxFit.contain,
+      );
+      canvas.restore();
+    }
 
     final picture = recorder.endRecording();
-    final image = await picture.toImage(width.toInt(), height.toInt());
-    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-    final bytes = byteData!.buffer.asUint8List();
-
-    return BitmapDescriptor.bytes(bytes, width: width, height: height);
-  }
-
-  Color _statusColor(ChargerStatus status) {
-    switch (status) {
-      case ChargerStatus.available:
-        return const Color(0xFF4CAF50);
-      case ChargerStatus.occupied:
-        return const Color(0xFFFF9800);
-      case ChargerStatus.unavailable:
-        return const Color(0xFFE53935);
-    }
-  }
-
-  void _onMapCreated(GoogleMapController controller) {
-    _mapController = controller;
-  }
-
-  void _recenterMap() {
-    _mapController?.animateCamera(
-      CameraUpdate.newCameraPosition(_initialPosition),
+    final rendered = await picture.toImage(dim.toInt(), dim.toInt());
+    final bytes = await rendered.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.bytes(
+      bytes!.buffer.asUint8List(),
+      imagePixelRatio: ratio,
     );
-    setState(() => _selectedCharger = null);
+  }
+
+  Future<BitmapDescriptor> _createUserMarker() async {
+    final ratio = _ratio;
+    final dim = 24.0 * ratio;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final center = Offset(dim / 2, dim / 2);
+
+    final shadow = Paint()..color = AppColors.primary.withValues(alpha: 0.5);
+    canvas.drawCircle(center, dim / 2, shadow);
+
+    final dot = Paint()..color = AppColors.primary;
+    canvas.drawCircle(center, (14.0 * ratio) / 2, dot);
+
+    final picture = recorder.endRecording();
+    final rendered = await picture.toImage(dim.toInt(), dim.toInt());
+    final bytes = await rendered.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.bytes(
+      bytes!.buffer.asUint8List(),
+      imagePixelRatio: ratio,
+    );
+  }
+
+  Future<ui.Image> _loadNetworkImage(String url) async {
+    final client = HttpClient();
+    final request = await client.getUrl(Uri.parse(url));
+    final response = await request.close();
+    final bytes = await consolidateHttpClientResponseBytes(response);
+    final codec = await ui.instantiateImageCodec(bytes);
+    final frame = await codec.getNextFrame();
+    return frame.image;
+  }
+
+  void _animateToLocation(LatLng coords) {
+    _programmaticMove = true;
+    _mapController?.animateCamera(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(target: coords, zoom: 13),
+      ),
+    );
+  }
+
+  void _animateToMarker(LatLng coords) {
+    _programmaticMove = true;
+    _mapController?.animateCamera(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(
+          target: LatLng(math.max(coords.latitude - 0.0025, -90), coords.longitude),
+          zoom: 15,
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final topPad = MediaQuery.of(context).padding.top;
-    final bottomPad = MediaQuery.of(context).padding.bottom;
-
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Stack(
-        children: [
-          GoogleMap(
-            onMapCreated: _onMapCreated,
-            initialCameraPosition: _initialPosition,
-            markers: _markers,
-            myLocationEnabled: false,
-            myLocationButtonEnabled: false,
-            zoomControlsEnabled: false,
-            compassEnabled: false,
-            mapToolbarEnabled: false,
-            mapType: MapType.normal,
-            style: _mapStyle,
-            onTap: (_) => setState(() => _selectedCharger = null),
-            padding: EdgeInsets.only(
-              top: topPad + 72,
-              bottom: _selectedCharger != null ? 310 : 100,
-            ),
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        GoogleMap(
+          initialCameraPosition: const CameraPosition(
+            target: _initialCoords,
+            zoom: 11,
           ),
-
-          _buildSearchBar(topPad),
-
-          if (_loadingChargers)
-            Positioned(
-              top: topPad + 80,
-              left: 0,
-              right: 0,
-              child: const Center(
-                child: SizedBox(
-                  width: 32,
-                  height: 32,
-                  child: CircularProgressIndicator(
-                    color: AppColors.primary,
-                    strokeWidth: 3,
+          style: _mapStyle,
+          markers: _markers,
+          myLocationEnabled: false,
+          myLocationButtonEnabled: false,
+          zoomControlsEnabled: false,
+          compassEnabled: false,
+          mapToolbarEnabled: false,
+          rotateGesturesEnabled: true,
+          tiltGesturesEnabled: false,
+          onMapCreated: (controller) => _mapController = controller,
+          onCameraMove: (position) => _cameraTarget = position.target,
+          onCameraMoveStarted: () {
+            if (_programmaticMove) return;
+            if (_showCharger) setState(() => _showCharger = false);
+          },
+          onCameraIdle: () {
+            _programmaticMove = false;
+            _fetchChargers(_cameraTarget);
+          },
+        ),
+        Positioned.fill(
+          child: Padding(
+            padding: const EdgeInsets.only(
+              left: AppDimensions.paddingHorizontal,
+              right: AppDimensions.paddingHorizontal,
+              bottom: AppDimensions.paddingBottom,
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                if (_showCharger && _selectedCharger != null)
+                  _ChargerCard(
+                    key: ValueKey(_selectedCharger!.self),
+                    charger: _selectedCharger!,
+                    onClose: () => setState(() => _showCharger = false),
                   ),
-                ),
-              ),
-            ),
-
-          if (_selectedCharger != null)
-            _ChargerInfoCard(
-              charger: _selectedCharger!,
-              bottomPad: bottomPad,
-              onClose: () => setState(() => _selectedCharger = null),
-            ),
-
-          _buildLocationButton(bottomPad),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSearchBar(double topPad) {
-    return Positioned(
-      top: topPad + 12,
-      left: 16,
-      right: 16,
-      child: Container(
-        height: 50,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(25),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.12),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            const SizedBox(width: 18),
-            Icon(Icons.search, color: Colors.grey.shade500, size: 22),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Buscar cargador...',
-                style: TextStyle(
-                  color: Colors.grey.shade500,
-                  fontSize: 15,
-                ),
-              ),
-            ),
-            Container(
-              width: 38,
-              height: 38,
-              margin: const EdgeInsets.only(right: 6),
-              decoration: BoxDecoration(
-                color: AppColors.primary,
-                borderRadius: BorderRadius.circular(19),
-              ),
-              child: const Icon(
-                Icons.tune,
-                color: Colors.white,
-                size: 18,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLocationButton(double bottomPad) {
-    return Positioned(
-      bottom: _selectedCharger != null ? 310 + bottomPad : 24 + bottomPad,
-      right: 16,
-      child: Container(
-        width: 48,
-        height: 48,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.15),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: _recenterMap,
-            borderRadius: BorderRadius.circular(24),
-            child: const Icon(
-              Icons.my_location,
-              color: Color(0xFF555555),
-              size: 20,
+              ],
             ),
           ),
+        ),
+        Positioned(
+          top: MediaQuery.of(context).size.height * 0.3,
+          right: 16,
+          child: _IconButton(
+            icon: Icons.my_location,
+            onPressed: () {
+              final location = _userLocation;
+              if (location != null) _animateToLocation(location);
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _IconButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  const _IconButton({required this.icon, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.card,
+      shape: const CircleBorder(),
+      child: InkWell(
+        onTap: onPressed,
+        customBorder: const CircleBorder(),
+        child: SizedBox(
+          width: 48,
+          height: 48,
+          child: Icon(icon, size: 28, color: AppColors.primary),
         ),
       ),
     );
   }
 }
 
-class _ChargerInfoCard extends StatelessWidget {
+class _ChargerCard extends ConsumerStatefulWidget {
   final CompanyCharger charger;
   final VoidCallback onClose;
-  final double bottomPad;
 
-  const _ChargerInfoCard({
+  const _ChargerCard({
+    super.key,
     required this.charger,
     required this.onClose,
-    required this.bottomPad,
   });
 
-  void _openLocation(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => LocationScreen(charger: charger)),
-    );
+  @override
+  ConsumerState<_ChargerCard> createState() => _ChargerCardState();
+}
+
+class _ChargerCardState extends ConsumerState<_ChargerCard> {
+  CompanyLocation? _location;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLocation();
   }
 
-  Color get _statusColor {
-    switch (charger.status) {
-      case ChargerStatus.available:
-        return const Color(0xFF4CAF50);
-      case ChargerStatus.occupied:
-        return const Color(0xFFFF9800);
-      case ChargerStatus.unavailable:
-        return const Color(0xFFE53935);
-    }
-  }
-
-  Color get _statusBg {
-    switch (charger.status) {
-      case ChargerStatus.available:
-        return const Color(0xFFE8F5E9);
-      case ChargerStatus.occupied:
-        return const Color(0xFFFFF3E0);
-      case ChargerStatus.unavailable:
-        return const Color(0xFFFFEBEE);
-    }
-  }
-
-  String get _statusText {
-    switch (charger.status) {
-      case ChargerStatus.available:
-        return 'Disponible';
-      case ChargerStatus.occupied:
-        return 'Ocupado';
-      case ChargerStatus.unavailable:
-        return 'No disponible';
-    }
+  Future<void> _loadLocation() async {
+    try {
+      final location = await ref
+          .read(apiClientProvider)
+          .referenceApi
+          .findByReference(widget.charger.location, CompanyLocation.fromJson);
+      if (mounted) setState(() => _location = location);
+    } catch (_) {}
   }
 
   @override
   Widget build(BuildContext context) {
-    return Positioned(
-      bottom: 16 + bottomPad,
-      left: 12,
-      right: 12,
+    final charger = widget.charger;
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+      builder: (context, value, child) => Opacity(
+        opacity: value,
+        child: Transform.translate(
+          offset: Offset(0, (1 - value) * 24),
+          child: child,
+        ),
+      ),
       child: Container(
-        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.background,
           borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.15),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
-            ),
-          ],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: _statusBg,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(Icons.ev_station, color: _statusColor, size: 24),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        charger.name,
-                        style: const TextStyle(
-                          color: Color(0xFF1A1A1A),
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        charger.serial,
-                        style: TextStyle(
-                          color: Colors.grey.shade500,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
+            GestureDetector(
+              onTap: widget.onClose,
+              behavior: HitTestBehavior.opaque,
+              child: const SizedBox(
+                width: double.infinity,
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 4),
+                  child: Icon(
+                    Icons.keyboard_arrow_down,
+                    color: AppColors.surface,
+                    size: 24,
                   ),
                 ),
-                GestureDetector(
-                  onTap: onClose,
-                  child: Container(
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      Icons.close,
-                      color: Colors.grey.shade600,
-                      size: 16,
+              ),
+            ),
+            const HorizontalSeparator(),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Flexible(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        AppText(charger.name, type: AppTextType.subtitle),
+                        _OpeningHoursText(
+                          openingHours: _location?.openingHours,
+                        ),
+                      ],
                     ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                _InfoTag(
-                  icon: Icons.bolt,
-                  label: '${charger.powerKw} kW',
-                  color: AppColors.primary,
-                ),
-                const SizedBox(width: 6),
-                _InfoTag(
-                  icon: Icons.circle,
-                  label: _statusText,
-                  color: _statusColor,
-                  iconSize: 8,
-                ),
-                const SizedBox(width: 6),
-                _InfoTag(
-                  icon: Icons.cable,
-                  label: '${charger.connectors.length}',
-                  color: const Color(0xFF5C6BC0),
-                ),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(6),
+                  AppText(
+                    '${charger.powerKw} kW',
+                    type: AppTextType.title,
+                    color: AppColors.primary,
                   ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        charger.online ? Icons.wifi : Icons.wifi_off,
-                        color: charger.online ? const Color(0xFF4CAF50) : Colors.grey,
-                        size: 12,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        charger.online ? 'Online' : 'Offline',
-                        style: TextStyle(
-                          color: Colors.grey.shade600,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => _openLocation(context),
-                    child: Container(
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(10),
+            const HorizontalSeparator(),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Wrap(
+                alignment: WrapAlignment.spaceAround,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  for (final connector in charger.connectors)
+                    ConnectorInfo(
+                      online: charger.online,
+                      connector: connector,
+                      format: ConnectorFormat.small,
+                    ),
+                ],
+              ),
+            ),
+            const HorizontalSeparator(),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _SecondaryButton(
+                      onPressed: () => context.push(
+                        '/location?locationRef=${Uri.encodeComponent(charger.location)}',
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.directions, color: Colors.grey.shade700, size: 18),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Direcciones',
-                            style: TextStyle(
-                              color: Colors.grey.shade700,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
+                          const Icon(
+                            Icons.travel_explore,
+                            size: 32,
+                            color: AppColors.surface,
                           ),
+                          const SizedBox(width: 4),
+                          AppText('page.charger.location'.tr()),
                         ],
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 2,
-                  child: GestureDetector(
-                    onTap: () => _openLocation(context),
-                    child: Container(
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: AppColors.primary,
-                        borderRadius: BorderRadius.circular(10),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.primary.withValues(alpha: 0.3),
-                            blurRadius: 8,
-                            offset: const Offset(0, 3),
-                          ),
-                        ],
-                      ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.ev_station, color: Colors.white, size: 18),
-                          SizedBox(width: 6),
-                          Text(
-                            'Ver detalles',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 56,
+                    child: _SecondaryButton(
+                      onPressed: () =>
+                          openMapsTravel(charger.lat, charger.lng),
+                      child: const Icon(
+                        Icons.directions,
+                        size: 32,
+                        color: AppColors.surface,
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ],
         ),
@@ -576,42 +555,121 @@ class _ChargerInfoCard extends StatelessWidget {
   }
 }
 
-class _InfoTag extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-  final double iconSize;
+class _SecondaryButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  final Widget child;
 
-  const _InfoTag({
-    required this.icon,
-    required this.label,
-    required this.color,
-    this.iconSize = 14,
-  });
+  const _SecondaryButton({required this.onPressed, required this.child});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: color, size: iconSize),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
+    return SizedBox(
+      height: 48,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.highlight, width: 1),
             ),
+            alignment: Alignment.center,
+            child: child,
           ),
-        ],
+        ),
       ),
     );
+  }
+}
+
+class _OpeningHoursText extends StatefulWidget {
+  final List<OpeningPeriod>? openingHours;
+
+  const _OpeningHoursText({required this.openingHours});
+
+  @override
+  State<_OpeningHoursText> createState() => _OpeningHoursTextState();
+}
+
+class _OpeningHoursTextState extends State<_OpeningHoursText> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) {
+        if (mounted) setState(() {});
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final openingHours = widget.openingHours;
+
+    if (openingHours == null) {
+      return const AppText(' ', type: AppTextType.hint);
+    }
+
+    if (openingHours.isEmpty) {
+      return AppText('page.map.open-24hs'.tr(), type: AppTextType.hint);
+    }
+
+    final now = DateTime.now();
+    final current = openingHours
+        .where((period) => isInOpeningHours(now, period))
+        .firstOrNull;
+
+    if (current == null) {
+      final next = getNextOpeningTime(now, openingHours);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AppText(
+            'page.map.closed'.tr(),
+            type: AppTextType.hint,
+            color: AppColors.error,
+          ),
+          if (next != null)
+            AppText(
+              'page.map.opens-at'.tr(
+                namedArgs: {
+                  'weekday': _weekdayLabel(context, next.weekday),
+                  'time': formatWeekTime(next),
+                },
+              ),
+              type: AppTextType.hint,
+            ),
+        ],
+      );
+    }
+
+    return AppText(
+      'page.map.open'.tr(
+        namedArgs: {
+          'open': formatWeekTime(current.open),
+          'close': formatWeekTime(current.close),
+        },
+      ),
+      type: AppTextType.hint,
+    );
+  }
+
+  String _weekdayLabel(BuildContext context, int weekday) {
+    final target = weekday == 0 ? 7 : weekday;
+    final monday = DateTime(2024, 1, 1);
+    final date = monday.add(Duration(days: target - 1));
+    return DateFormat('EEEE', context.locale.toString()).format(date);
   }
 }

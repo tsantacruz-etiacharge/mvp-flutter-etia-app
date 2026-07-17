@@ -30,4 +30,20 @@ class SessionApi {
       ChargingSession.fromJson,
     );
   }
+
+  Future<void> start({
+    required String serial,
+    required int connectorID,
+    required int limitMinutes,
+  }) async {
+    await _dio.post('/charging-sessions', data: {
+      'serial': serial,
+      'connectorID': connectorID,
+      'limitMinutes': limitMinutes,
+    });
+  }
+
+  Future<void> stop(ChargingSession session) async {
+    await _dio.post('${session.self}/stop');
+  }
 }

@@ -1,387 +1,196 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
 import '../models/company_charger.dart';
-import '../models/charger_connector.dart';
+import '../models/company_location.dart';
+import '../providers/auth_provider.dart';
+import '../providers/companies_provider.dart';
 import '../theme/colors.dart';
+import '../theme/dimensions.dart';
+import '../theme/text_styles.dart';
+import '../utils/maps.dart';
+import '../widgets/app_text.dart';
+import '../widgets/back_button.dart';
+import '../widgets/connector_info.dart';
+import '../widgets/horizontal_separator.dart';
 
-class LocationScreen extends StatelessWidget {
-  final CompanyCharger charger;
+class LocationScreen extends ConsumerStatefulWidget {
+  final String locationRef;
 
-  const LocationScreen({super.key, required this.charger});
+  const LocationScreen({super.key, required this.locationRef});
 
-  Color get _statusColor {
-    switch (charger.status) {
-      case ChargerStatus.available:
-        return AppColors.success;
-      case ChargerStatus.occupied:
-        return AppColors.warning;
-      case ChargerStatus.unavailable:
-        return AppColors.error;
+  @override
+  ConsumerState<LocationScreen> createState() => _LocationScreenState();
+}
+
+class _LocationScreenState extends ConsumerState<LocationScreen> {
+  CompanyLocation? _location;
+  List<CompanyCharger> _chargers = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  Future<void> _load() async {
+    final api = ref.read(apiClientProvider);
+    try {
+      final location = await api.referenceApi
+          .findByReference(widget.locationRef, CompanyLocation.fromJson);
+      if (!mounted) return;
+      setState(() => _location = location);
+
+      final companies = await ref.read(companiesProvider.future);
+      final isMember =
+          companies.any((c) => c.company == location.company);
+      final visibility = isMember ? null : 'public';
+
+      final page = await api.companyChargerApi.getPaged(
+        location: location.self,
+        visibility: visibility,
+      );
+      if (!mounted) return;
+      setState(() => _chargers = page.data);
+    } catch (_) {
+      if (mounted) _goBack();
     }
   }
 
-  String get _statusText {
-    switch (charger.status) {
-      case ChargerStatus.available:
-        return 'Disponible';
-      case ChargerStatus.occupied:
-        return 'Ocupado';
-      case ChargerStatus.unavailable:
-        return 'No disponible';
+  void _goBack() {
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/main');
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: Column(
-        children: [
-          _buildMapPreview(context),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(24),
-              children: [
-                _buildHeader(),
-                const SizedBox(height: 24),
-                _buildInfoSection(),
-                const SizedBox(height: 24),
-                _buildConnectorsSection(),
-                const SizedBox(height: 24),
-                _buildCoordinatesSection(),
-                const SizedBox(height: 100),
-              ],
-            ),
-          ),
-          _buildBottomActions(),
-        ],
-      ),
-    );
-  }
+    final location = _location;
+    if (location == null) {
+      return const ColoredBox(
+        color: AppColors.background,
+        child: Center(
+          child: CircularProgressIndicator(color: AppColors.primary),
+        ),
+      );
+    }
 
-  Widget _buildMapPreview(BuildContext context) {
-    return SizedBox(
-      height: 200,
-      width: double.infinity,
+    final width = MediaQuery.of(context).size.width;
+
+    return ColoredBox(
+      color: AppColors.background,
       child: Stack(
         children: [
-          GoogleMap(
-            initialCameraPosition: CameraPosition(
-              target: LatLng(charger.lat, charger.lng),
-              zoom: 15.0,
-            ),
-            zoomControlsEnabled: false,
-            scrollGesturesEnabled: false,
-            rotateGesturesEnabled: false,
-            tiltGesturesEnabled: false,
-            myLocationEnabled: false,
-            markers: {
-              Marker(
-                markerId: MarkerId(charger.self),
-                position: LatLng(charger.lat, charger.lng),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: double.infinity,
+                height: width * 9 / 16,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    location.imageUrl != null
+                        ? CachedNetworkImage(
+                            imageUrl: location.imageUrl!,
+                            fit: BoxFit.cover,
+                            placeholder: (_, _) => Image.asset(
+                              'assets/images/location-placeholder.png',
+                              fit: BoxFit.cover,
+                            ),
+                            errorWidget: (_, _, _) => Image.asset(
+                              'assets/images/location-placeholder.png',
+                              fit: BoxFit.cover,
+                            ),
+                          )
+                        : Image.asset(
+                            'assets/images/location-placeholder.png',
+                            fit: BoxFit.cover,
+                          ),
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Colors.transparent, AppColors.background],
+                          stops: [0.6, 1.0],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            },
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppDimensions.paddingHorizontal,
+                  vertical: 16,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Flexible(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          AppText(location.name, type: AppTextType.subtitle),
+                          AppText(location.city, type: AppTextType.label),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 12),
+                      child: SizedBox(
+                        width: 56,
+                        height: 48,
+                        child: Material(
+                          color: Colors.transparent,
+                          borderRadius: BorderRadius.circular(16),
+                          child: InkWell(
+                            onTap: () =>
+                                openMapsTravel(location.lat, location.lng),
+                            borderRadius: BorderRadius.circular(16),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: AppColors.highlight,
+                                  width: 1,
+                                ),
+                              ),
+                              alignment: Alignment.center,
+                              child: const Icon(
+                                Icons.directions,
+                                size: 32,
+                                color: AppColors.surface,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppDimensions.paddingHorizontal,
+                  ),
+                  itemCount: _chargers.length,
+                  itemBuilder: (context, index) =>
+                      _ChargerListCard(charger: _chargers[index]),
+                ),
+              ),
+            ],
           ),
           Positioned(
-            top: MediaQuery.of(context).padding.top + 12,
-            left: 16,
-            child: GestureDetector(
-              onTap: () => Navigator.pop(context),
-              child: Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1A1A1A),
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.3),
-                      blurRadius: 8,
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.arrow_back,
-                  color: Colors.white,
-                  size: 22,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            color: _statusColor.withValues(alpha: 0.2),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Icon(Icons.ev_station, color: _statusColor, size: 28),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                charger.name,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                charger.serial,
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.6),
-                  fontSize: 14,
-                ),
-              ),
-            ],
-          ),
-        ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: _statusColor.withValues(alpha: 0.2),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Text(
-            _statusText,
-            style: TextStyle(
-              color: _statusColor,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildInfoSection() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.1),
-          width: 1,
-        ),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          _buildInfoItem(Icons.bolt, '${charger.powerKw} kW', 'Potencia'),
-          Container(width: 1, height: 40, color: Colors.white.withValues(alpha: 0.1)),
-          _buildInfoItem(Icons.cable, '${charger.connectors.length}', 'Conectores'),
-          Container(width: 1, height: 40, color: Colors.white.withValues(alpha: 0.1)),
-          _buildInfoItem(
-            Icons.wifi,
-            charger.online ? 'Online' : 'Offline',
-            'Estado',
-            valueColor: charger.online ? AppColors.success : AppColors.error,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildInfoItem(IconData icon, String value, String label, {Color? valueColor}) {
-    return Column(
-      children: [
-        Icon(icon, color: AppColors.primary, size: 20),
-        const SizedBox(height: 8),
-        Text(
-          value,
-          style: TextStyle(
-            color: valueColor ?? Colors.white,
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.5),
-            fontSize: 12,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildConnectorsSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Conectores',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 12),
-        ...charger.connectors.map((connector) => _ConnectorCard(connector: connector)),
-      ],
-    );
-  }
-
-  Widget _buildCoordinatesSection() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.1),
-          width: 1,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Coordenadas',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.7),
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Latitud',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.5),
-                        fontSize: 11,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      charger.lat.toStringAsFixed(6),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Container(width: 1, height: 30, color: Colors.white.withValues(alpha: 0.1)),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Longitud',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.5),
-                          fontSize: 11,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        charger.lng.toStringAsFixed(6),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBottomActions() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A),
-        border: Border(
-          top: BorderSide(color: Colors.white.withValues(alpha: 0.1), width: 1),
-        ),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Container(
-              height: 50,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.directions, color: Colors.white, size: 20),
-                  SizedBox(width: 8),
-                  Text(
-                    'Direcciones',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Container(
-              height: 50,
-              decoration: BoxDecoration(
-                color: AppColors.primary,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.ev_station, color: Colors.white, size: 20),
-                  SizedBox(width: 8),
-                  Text(
-                    'Iniciar carga',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            top: MediaQuery.of(context).padding.top,
+            left: 0,
+            child: const BackButtonWidget(),
           ),
         ],
       ),
@@ -389,115 +198,59 @@ class LocationScreen extends StatelessWidget {
   }
 }
 
-class _ConnectorCard extends StatelessWidget {
-  final ChargerConnector connector;
+class _ChargerListCard extends StatelessWidget {
+  final CompanyCharger charger;
 
-  const _ConnectorCard({required this.connector});
-
-  Color get _statusColor {
-    switch (connector.status) {
-      case ChargePointStatus.available:
-        return AppColors.success;
-      case ChargePointStatus.charging:
-      case ChargePointStatus.preparing:
-        return AppColors.warning;
-      default:
-        return AppColors.error;
-    }
-  }
-
-  String get _statusText {
-    switch (connector.status) {
-      case ChargePointStatus.available:
-        return 'Disponible';
-      case ChargePointStatus.charging:
-        return 'En carga';
-      case ChargePointStatus.preparing:
-        return 'Preparando';
-      case ChargePointStatus.suspendedEVSE:
-      case ChargePointStatus.suspendedEV:
-        return 'Suspendido';
-      case ChargePointStatus.finishing:
-        return 'Finalizando';
-      case ChargePointStatus.reserved:
-        return 'Reservado';
-      case ChargePointStatus.unavailable:
-        return 'No disponible';
-      case ChargePointStatus.faulted:
-        return 'Con error';
-    }
-  }
-
-  String get _typeText {
-    switch (connector.type) {
-      case ConnectorType.type2:
-        return 'Type 2';
-      case ConnectorType.ccs2:
-        return 'CCS2';
-    }
-  }
+  const _ChargerListCard({required this.charger});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: _statusColor.withValues(alpha: 0.3),
-          width: 1,
-        ),
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.card, width: 1),
       ),
-      child: Row(
+      child: Column(
         children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: _statusColor.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(Icons.cable, color: _statusColor, size: 22),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  'Conector ${connector.connectorID}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      AppText(charger.name, type: AppTextType.subtitle),
+                      AppText(charger.model, type: AppTextType.hint),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  _typeText,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.6),
-                    fontSize: 12,
-                  ),
+                AppText(
+                  '${charger.powerKw} kW',
+                  type: AppTextType.title,
+                  color: AppColors.primary,
                 ),
               ],
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: _statusColor.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              _statusText,
-              style: TextStyle(
-                color: _statusColor,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
+          const HorizontalSeparator(),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Wrap(
+              alignment: WrapAlignment.spaceAround,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                for (final connector in charger.connectors)
+                  ConnectorInfo(
+                    online: charger.online,
+                    connector: connector,
+                    format: ConnectorFormat.small,
+                  ),
+              ],
             ),
           ),
         ],
