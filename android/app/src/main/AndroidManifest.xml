@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <application
-        android:label="ETIA Maps"
+        android:label="Etia"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -25,13 +25,21 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Deep link for payment return (Fase 4): etia://payment-result -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="${APP_SCHEME}" android:host="payment-result"/>
+            </intent-filter>
         </activity>
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Injected from android/secrets.properties (see secrets.properties.example). -->
         <meta-data
             android:name="com.google.android.geo.API_KEY"
-            android:value="AIzaSyArCO9jpPhkSizIJXufh-7aJqNTZpylIrI" />
+            android:value="${GOOGLE_MAPS_API_KEY}" />
     </application>
     <queries>
         <intent>

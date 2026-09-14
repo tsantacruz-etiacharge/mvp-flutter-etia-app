@@ -1,4 +1,4 @@
-package io.etiaapp.prototype.etia_maps_prototype
+package io.etiaapp.app
 
 import io.flutter.embedding.android.FlutterActivity
 

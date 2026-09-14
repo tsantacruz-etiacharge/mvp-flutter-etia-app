@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:etia_maps_prototype/app.dart';
+import 'package:etia_user_app/app.dart';
 
 void main() {
   testWidgets('App builds', (WidgetTester tester) async {

@@ -1,5 +1,5 @@
-name: etia_maps_prototype
-description: "A new Flutter project."
+name: etia_user_app
+description: "ETIA user app - Flutter client (functional parity with etia-user-app)."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -16,7 +16,9 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+1
+# Aligned with etia-user-app app.config.ts (3.2.1 / versionCode 10037).
+# Force-update compares this version against the backend supported range.
+version: 3.2.1+10037
 
 environment:
   sdk: ^3.12.2
@@ -31,13 +33,9 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
-  cupertino_icons: ^1.0.8
   google_maps_flutter: ^2.17.1
   dio: ^5.10.0
   flutter_secure_storage: ^10.3.1
-  shared_preferences: ^2.5.5
   jwt_decoder: ^2.0.1
   intl: ^0.20.2
   flutter_riverpod: ^2.5.1

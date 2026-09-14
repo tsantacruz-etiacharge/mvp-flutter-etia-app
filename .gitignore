@@ -45,4 +45,9 @@ app.*.map.json
 /android/app/release
 
 # Android local config (contains API keys and SDK paths)
+# (contains API keys and SDK paths)
 /android/local.properties
+/android/secrets.properties
+
+# iOS secrets (API keys injected into Info.plist)
+/ios/Flutter/Secrets.xcconfig

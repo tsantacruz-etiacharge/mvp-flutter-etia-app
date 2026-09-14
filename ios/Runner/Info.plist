@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Etia Maps Prototype</string>
+	<string>Etia</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>etia_maps_prototype</string>
+	<string>etia_user_app</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -70,5 +70,21 @@
 	<string>Se necesita la cámara para escanear el código QR del cargador</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Se necesita tu ubicación para mostrar los cargadores cercanos</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>etia</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>$(APP_SCHEME)</string>
+			</array>
+		</dict>
+	</array>
+	<!-- Injected from ios/Flutter/Secrets.xcconfig (see Secrets.xcconfig.example). -->
+	<key>GMSApiKey</key>
+	<string>$(GOOGLE_MAPS_API_KEY)</string>
+	<key>MercadoPagoPublicKey</key>
+	<string>$(MERCADOPAGO_PUBLIC_KEY)</string>
 </dict>
 </plist>

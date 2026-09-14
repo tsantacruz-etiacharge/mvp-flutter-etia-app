@@ -1,0 +1,37 @@
+{
+  // Run/Debug configs. API_URL / APP_VARIANT / keys injected via --dart-define.
+  // Fill in real keys locally; never commit them.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "ETIA dev (local backend)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "args": [
+        "--dart-define=APP_VARIANT=dev",
+        "--dart-define=API_URL=https://etia-backend-ubes5.ondigitalocean.app/rest"
+      ]
+    },
+    {
+      "name": "ETIA preview",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "args": [
+        "--dart-define=APP_VARIANT=preview",
+        "--dart-define=API_URL=https://etia-backend-ubes5.ondigitalocean.app/rest"
+      ]
+    },
+    {
+      "name": "ETIA production",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "args": [
+        "--dart-define=APP_VARIANT=production",
+        "--dart-define=API_URL=https://etia-backend-ubes5.ondigitalocean.app/rest"
+      ]
+    }
+  ]
+}
