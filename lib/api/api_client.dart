@@ -7,6 +7,7 @@ import '../utils/app_logger.dart';
 import 'auth_api.dart';
 import 'reference_api.dart';
 import 'company_charger_api.dart';
+import 'country_api.dart';
 import 'session_api.dart';
 import 'benefit_api.dart';
 import 'user_api.dart';
@@ -19,12 +20,18 @@ class ApiClient {
   late final AuthApi authApi;
   late final ReferenceApi referenceApi;
   late final CompanyChargerApi companyChargerApi;
+  late final CountryApi countryApi;
   late final SessionApi sessionApi;
   late final BenefitApi benefitApi;
   late final UserApi userApi;
 
   String Function()? _authTokenGetter;
   Future<void> Function()? _onUnauthorized;
+
+  /// Fired with the value of the `x-app-supported-range` header whenever a
+  /// response (or error response) carries it. Mirrors the response
+  /// interceptor in ForceUpdateProvider.tsx. Wired by ForceUpdateProvider.
+  void Function(String range)? onSupportedRange;
 
   /// Single-flight guard: concurrent 401s share one refresh instead of
   /// firing N refresh calls (which caused token races / retry loops).
@@ -54,6 +61,7 @@ class ApiClient {
           '${response.requestOptions.method} ${response.requestOptions.uri} '
           '-> ${response.statusCode}',
         );
+        _notifySupportedRange(response.headers);
         handler.next(response);
       },
       onError: (error, handler) async {
@@ -64,6 +72,8 @@ class ApiClient {
           '-> $status (${error.type})',
           error.error,
         );
+        final headers = error.response?.headers;
+        if (headers != null) _notifySupportedRange(headers);
 
         // Never retry the auth endpoints themselves: a 401 from
         // /auth/refresh or /auth/signin means bad credentials, not an
@@ -95,9 +105,20 @@ class ApiClient {
     authApi = AuthApi(dio);
     referenceApi = ReferenceApi(dio);
     companyChargerApi = CompanyChargerApi(dio);
+    countryApi = CountryApi(dio);
     sessionApi = SessionApi(dio);
     benefitApi = BenefitApi(dio);
     userApi = UserApi(dio);
+  }
+
+  void _notifySupportedRange(Headers headers) {
+    final values = headers['x-app-supported-range'];
+    if (values == null || values.isEmpty) return;
+    try {
+      onSupportedRange?.call(values.first);
+    } catch (e) {
+      AppLogger.warning('onSupportedRange handler threw', e);
+    }
   }
 
   bool _isAuthPath(String path) => path.startsWith('/auth/');
@@ -110,7 +131,9 @@ class ApiClient {
     _refreshFailed = false;
     final future = callback().then(
       (_) {},
-      onError: (_) => _refreshFailed = true,
+      onError: (_) {
+        _refreshFailed = true;
+      },
     ).whenComplete(() => _refreshInFlight = null);
     _refreshInFlight = future;
     return future;

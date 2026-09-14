@@ -164,6 +164,8 @@
 
   "page.language.title": "Changer de langue",
   "page.complete-profile.title": "Compléter le profil",
+  "page.force-update.title": "Mise à jour requise",
+  "page.force-update.message": "Une nouvelle version de l'application est disponible. Merci de la mettre à jour pour continuer.",
   "page.sign-in.forgot-password": "Mot de passe oublié ?",
 
   "common.sign-up": "S'inscrire",
@@ -179,6 +181,7 @@
   "common.retry": "Réessayer",
   "common.next": "Suivant",
   "common.previous": "Ancien",
+  "common.update": "Mettre à jour",
 
   "error.connection": "Pas de connexion Internet",
   "error.unexpected": "Un problème est survenu",

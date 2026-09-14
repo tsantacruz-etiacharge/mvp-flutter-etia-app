@@ -35,9 +35,15 @@ class AuthProvider extends ChangeNotifier {
   User? _user;
   User? get user => _user;
 
+  /// True once the profile fetch settled (success or 404-without-profile).
+  /// The router uses it to tell "still loading" apart from "needs onboarding".
+  /// Mirrors UserDto|null|undefined in UserProvider.tsx.
+  bool _userLoaded = false;
+  bool get userLoaded => _userLoaded;
+
   bool _restoring = false;
 
-  AuthProvider({required ApiClient api}) : _api = api {
+  AuthProvider({required this._api}) {
     _api.setAuthGetter(() => _accessToken);
     _api.setOnUnauthorized(_restoreSession);
     _restoreSession();
@@ -63,6 +69,7 @@ class AuthProvider extends ChangeNotifier {
     _accessToken = '';
     _userRef = null;
     _user = null;
+    _userLoaded = false;
     _authState = AuthState.signedOut;
     notifyListeners();
   }
@@ -116,12 +123,24 @@ class AuthProvider extends ChangeNotifier {
   Future<void> _fetchUser() async {
     if (_userRef == null) {
       _user = null;
+      _userLoaded = true;
+      notifyListeners();
       return;
     }
     try {
       _user = await _api.referenceApi.findByReference(_userRef!, User.fromJson);
+      _userLoaded = true;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        // Auth exists but no profile yet -> onboarding (complete-profile).
+        // Mirrors UserProvider.tsx 404 -> setUser(null).
+        _user = null;
+        _userLoaded = true;
+      }
+      // Other errors (offline, 500...): keep the previous user, same as prod
+      // which swallows non-404 errors without touching state.
     } catch (_) {
-      _user = null;
+      // Non-Dio errors: same, keep previous state.
     }
     notifyListeners();
   }

@@ -17,6 +17,29 @@ class UserApi {
     await _dio.put(userSelf, data: dto);
   }
 
+  /// Mirrors UserApi.create in etia-user-app (api/user/user.api.ts).
+  /// dateOfBirth is serialized as YYYY-MM-DD (manual formatting avoids the
+  /// UTC day-shift that toISOString() can produce near midnight).
+  Future<void> create({
+    required String firstName,
+    required String lastName,
+    required String gender,
+    required String countryCode,
+    required DateTime dateOfBirth,
+  }) async {
+    final dob =
+        '${dateOfBirth.year.toString().padLeft(4, '0')}-'
+        '${dateOfBirth.month.toString().padLeft(2, '0')}-'
+        '${dateOfBirth.day.toString().padLeft(2, '0')}';
+    await _dio.post('/users', data: {
+      'firstName': firstName,
+      'lastName': lastName,
+      'gender': gender,
+      'countryCode': countryCode,
+      'dateOfBirth': dob,
+    });
+  }
+
   Future<void> addCompany(String userSelf, String inviteCode) async {
     await _dio.post(
       '$userSelf/companies',

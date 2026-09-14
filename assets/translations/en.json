@@ -164,6 +164,8 @@
 
   "page.language.title": "Change language",
   "page.complete-profile.title": "Complete profile",
+  "page.force-update.title": "Update required",
+  "page.force-update.message": "A new version of the app is available. Please update to keep using it.",
   "page.sign-in.forgot-password": "Forgot password?",
 
   "common.sign-up": "Sign up",
@@ -179,6 +181,7 @@
   "common.retry": "Retry",
   "common.next": "Next",
   "common.previous": "Previous",
+  "common.update": "Update",
 
   "error.connection": "No internet connection",
   "error.unexpected": "Unexpected error",

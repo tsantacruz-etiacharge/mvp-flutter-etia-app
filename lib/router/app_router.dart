@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../providers/auth_provider.dart';
+import '../providers/force_update_provider.dart';
 import '../screens/auth/welcome_screen.dart';
 import '../screens/auth/sign_in_screen.dart';
 import '../screens/auth/sign_up_screen.dart';
@@ -21,6 +23,8 @@ import '../screens/more/contact_screen.dart';
 import '../screens/more/about_screen.dart';
 import '../screens/more/edit_profile_screen.dart';
 import '../screens/more/change_password_screen.dart';
+import '../screens/complete_profile_screen.dart';
+import '../screens/force_update_screen.dart';
 import '../screens/tutorial_screen.dart';
 import '../screens/credits_screen.dart';
 import '../screens/benefit_detail_screen.dart';
@@ -65,10 +69,11 @@ const _signedInRoutes = <String>{
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final auth = ref.read(authProvider);
+  final forceUpdate = ref.read(forceUpdateProvider);
 
   return GoRouter(
     initialLocation: '/restoring-session',
-    refreshListenable: auth,
+    refreshListenable: Listenable.merge([auth, forceUpdate]),
     redirect: (context, state) {
       final authState = auth.authState;
       final location = state.matchedLocation;
@@ -79,13 +84,29 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         return location == '/restoring-session' ? null : '/restoring-session';
       }
 
+      // Guard 1 (prod order): force-update blocks everything.
+      if (forceUpdate.isForceUpdateRequired) {
+        return location == '/force-update' ? null : '/force-update';
+      }
+
       if (location == '/change-language') return null;
 
       if (authState == AuthState.signedOut) {
         return _publicRoutes.contains(location) ? null : '/';
       }
 
-      // signedIn
+      // signedIn. Profile fetch unsettled -> stay (avoids flashing onboarding
+      // before the 404/200 distinction is known).
+      if (!auth.userLoaded) return null;
+
+      // Guard 4 (prod order): signed-in without profile -> onboarding.
+      if (auth.user == null) {
+        return location == '/complete-profile' ? null : '/complete-profile';
+      }
+
+      // Profile exists: /complete-profile is no longer reachable.
+      if (location == '/complete-profile') return '/main';
+
       return _signedInRoutes.contains(location) ? null : '/main';
     },
     routes: [
@@ -123,6 +144,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/restoring-session',
         builder: (context, state) => const RestoringSessionScreen(),
+      ),
+      GoRoute(
+        path: '/complete-profile',
+        builder: (context, state) => const CompleteProfileScreen(),
+      ),
+      GoRoute(
+        path: '/force-update',
+        builder: (context, state) => const ForceUpdateScreen(),
       ),
       GoRoute(path: '/main', builder: (context, state) => const MainScreen()),
       GoRoute(

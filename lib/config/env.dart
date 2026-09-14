@@ -64,6 +64,22 @@ class Env {
   static bool get isDev => appVariant == AppVariant.dev;
   static bool get isPreview => appVariant == AppVariant.preview;
   static bool get isProduction => appVariant == AppVariant.production;
+
+  /// App version for the force-update range check.
+  /// Keep the default in sync with pubspec.yaml. Release builds should pass
+  /// `--dart-define=APP_VERSION=$(flutter.buildName)`-equivalent explicitly.
+  /// (package_info_plus would be nicer; deferred to Fase 6 to avoid new
+  /// native plugins mid-migration.)
+  static const String appVersion = String.fromEnvironment(
+    'APP_VERSION',
+    defaultValue: '3.2.1',
+  );
+
+  /// Store URLs for the force-update screen (mirrors constants/env.ts).
+  static const String playStoreUrl =
+      'https://play.google.com/store/apps/details?id=io.etiaapp.app';
+  static const String appStoreUrl =
+      'https://apps.apple.com/us/app/etia/id1660981455';
 }
 
 /// Backwards-compatible top-level constant (used by api_client.dart).

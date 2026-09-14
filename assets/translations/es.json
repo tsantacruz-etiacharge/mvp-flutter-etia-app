@@ -164,6 +164,8 @@
 
   "page.language.title": "Cambiar idioma",
   "page.complete-profile.title": "Completar perfil",
+  "page.force-update.title": "Actualización requerida",
+  "page.force-update.message": "Hay una nueva versión de la app disponible. Actualizá para seguir usándola.",
   "page.sign-in.forgot-password": "¿Olvidaste tu contraseña?",
 
   "common.sign-up": "Registrarme",
@@ -179,6 +181,7 @@
   "common.retry": "Reintentar",
   "common.next": "Siguiente",
   "common.previous": "Anterior",
+  "common.update": "Actualizar",
 
   "error.connection": "Sin conexión a internet",
   "error.unexpected": "Ocurrió un problema",
