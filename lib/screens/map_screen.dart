@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:easy_localization/easy_localization.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -38,7 +39,11 @@ Color _statusColor(ChargerStatus status) {
 }
 
 class MapScreen extends ConsumerStatefulWidget {
-  const MapScreen({super.key});
+  /// False when another tab is visible (IndexedStack keeps us alive).
+  /// Pauses GPS polling and charger fetching while hidden.
+  final bool visible;
+
+  const MapScreen({super.key, this.visible = true});
 
   @override
   ConsumerState<MapScreen> createState() => _MapScreenState();
@@ -62,6 +67,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   LatLng? _userLocation;
   bool _programmaticMove = false;
   Timer? _locationTimer;
+  Timer? _fetchDebounce;
+  CancelToken? _chargersCancel;
+  int _fetchSeq = 0;
+  bool _locating = false;
 
   @override
   void initState() {
@@ -70,10 +79,31 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   }
 
   @override
+  void didUpdateWidget(MapScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.visible == oldWidget.visible) return;
+    if (widget.visible) {
+      _startLiveLocation();
+    } else {
+      _stopLiveLocation();
+    }
+  }
+
+  @override
   void dispose() {
-    _locationTimer?.cancel();
+    _stopLiveLocation();
     _mapController?.dispose();
     super.dispose();
+  }
+
+  void _stopLiveLocation() {
+    _locationTimer?.cancel();
+    _locationTimer = null;
+    _fetchDebounce?.cancel();
+    _fetchDebounce = null;
+    _chargersCancel?.cancel('hidden');
+    _chargersCancel = null;
+    _locating = false;
   }
 
   Future<void> _init() async {
@@ -85,28 +115,53 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   }
 
   Future<void> _startLiveLocation() async {
-    final permission = await Geolocator.checkPermission();
-    var granted = permission == LocationPermission.always ||
-        permission == LocationPermission.whileInUse;
-    if (!granted) {
-      final requested = await Geolocator.requestPermission();
-      granted = requested == LocationPermission.always ||
-          requested == LocationPermission.whileInUse;
-    }
-    if (!granted) return;
+    if (_locating || !widget.visible) return;
+    _locating = true;
+    try {
+      final permission = await Geolocator.checkPermission();
+      var granted = permission == LocationPermission.always ||
+          permission == LocationPermission.whileInUse;
+      if (!granted) {
+        final requested = await Geolocator.requestPermission();
+        granted = requested == LocationPermission.always ||
+            requested == LocationPermission.whileInUse;
+      }
+      if (!granted || !mounted || !widget.visible) return;
 
+      final first = await _currentPosition();
+      if (first != null && mounted) {
+        _setUserLocation(first, animate: true);
+      }
+
+      _locationTimer?.cancel();
+      _locationTimer =
+          Timer.periodic(const Duration(seconds: 5), (_) => _updateLocation());
+    } finally {
+      _locating = false;
+    }
+  }
+
+  /// Last known first (cheap, may be stale), current fix as fallback.
+  /// Prod only reads last-known and can strand the map in Buenos Aires.
+  Future<Position?> _currentPosition() async {
     final last = await Geolocator.getLastKnownPosition();
-    if (last != null) {
-      _setUserLocation(last, animate: true);
+    if (last != null) return last;
+    try {
+      return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.medium,
+        timeLimit: const Duration(seconds: 8),
+      );
+    } catch (_) {
+      return null;
     }
-
-    _locationTimer =
-        Timer.periodic(const Duration(seconds: 5), (_) => _updateLocation());
   }
 
   Future<void> _updateLocation() async {
-    final last = await Geolocator.getLastKnownPosition();
-    if (last != null) _setUserLocation(last, animate: false);
+    if (!widget.visible) return;
+    final position = await _currentPosition();
+    if (position != null && mounted) {
+      _setUserLocation(position, animate: false);
+    }
   }
 
   void _setUserLocation(Position position, {required bool animate}) {
@@ -120,19 +175,31 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final auth = ref.read(authProvider);
     final api = ref.read(apiClientProvider);
     final message = ref.read(messageProvider.notifier);
+    _chargersCancel?.cancel('superseded');
+    final cancel = CancelToken();
+    _chargersCancel = cancel;
+    final seq = ++_fetchSeq;
     try {
       final chargers = await api.companyChargerApi.getClosest(
         lat: origin.latitude,
         lng: origin.longitude,
         showPublic: true,
         user: auth.userRef,
+        cancelToken: cancel,
       );
+      if (!mounted || seq != _fetchSeq) return;
       _chargers = chargers.where((c) => c.iconUrl != null).toList();
       await _rebuildMarkers();
-    } on Object catch (e) {
+    } on DioException catch (e) {
+      // Cancelled/superseded fetches and unmounted states stay silent.
+      if (e.type == DioExceptionType.cancel || !mounted || seq != _fetchSeq) {
+        return;
+      }
       message.showError(
-        (e is Exception ? 'error.unexpected' : 'error.connection').tr(),
+        (e.response != null ? 'error.unexpected' : 'error.connection').tr(),
       );
+    } catch (_) {
+      // Non-Dio errors: silent, same as prod (non-axios -> return).
     }
   }
 
@@ -331,8 +398,15 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             if (_showCharger) setState(() => _showCharger = false);
           },
           onCameraIdle: () {
-            _programmaticMove = false;
-            _fetchChargers(_cameraTarget);
+            // Debounced: every pan/zoom used to fire GET /closest (429 risk).
+            _fetchDebounce?.cancel();
+            _fetchDebounce = Timer(
+              const Duration(milliseconds: 600),
+              () {
+                _programmaticMove = false;
+                if (mounted && widget.visible) _fetchChargers(_cameraTarget);
+              },
+            );
           },
         ),
         Positioned.fill(

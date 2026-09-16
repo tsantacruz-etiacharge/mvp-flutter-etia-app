@@ -14,6 +14,7 @@ class CompanyChargerApi {
     bool? showPublic,
     String? user,
     String? company,
+    CancelToken? cancelToken,
   }) async {
     final params = <String, dynamic>{
       'lat': lat,
@@ -26,6 +27,7 @@ class CompanyChargerApi {
     final response = await _dio.get(
       '/company-chargers/closest',
       queryParameters: params,
+      cancelToken: cancelToken,
     );
 
     return (response.data as List<dynamic>)
@@ -39,6 +41,7 @@ class CompanyChargerApi {
     String? visibility,
     int page = 0,
     int pageSize = 20,
+    CancelToken? cancelToken,
   }) async {
     final params = <String, dynamic>{
       'page': page,
@@ -51,6 +54,7 @@ class CompanyChargerApi {
     final response = await _dio.get(
       '/company-chargers',
       queryParameters: params,
+      cancelToken: cancelToken,
     );
 
     return Pagination.fromJson(

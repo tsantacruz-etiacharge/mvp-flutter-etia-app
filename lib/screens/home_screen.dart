@@ -1,8 +1,10 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../models/benefit.dart';
+import '../models/country.dart';
 import '../providers/auth_provider.dart';
 import '../providers/message_provider.dart';
 import '../theme/colors.dart';
@@ -23,6 +25,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   List<Benefit> _benefits = const [];
+  Country? _country;
 
   @override
   void initState() {
@@ -35,10 +38,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final lang = context.locale.languageCode;
     try {
       await ref.read(authProvider.notifier).refreshUser();
-      final benefits =
-          await ref.read(apiClientProvider).benefitApi.getAll(lang: lang);
+      final api = ref.read(apiClientProvider);
+      final results = await Future.wait([
+        api.benefitApi.getAll(lang: lang),
+        api.countryApi.getAll(),
+      ]);
       if (mounted) {
-        setState(() => _benefits = benefits);
+        final userCountry = (results[1] as List<Country>).where(
+          (c) => c.countryCode == ref.read(authProvider).user?.countryCode,
+        );
+        setState(() {
+          _benefits = results[0] as List<Benefit>;
+          _country = userCountry.isEmpty ? null : userCountry.first;
+        });
       }
     } catch (_) {
       message.showError('error.connection'.tr());
@@ -123,59 +135,85 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget _tutorialButton(double contentWidth) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
-      child: Stack(
-        children: [
-          Image.asset(
-            'assets/images/car-charging-2.png',
-            width: contentWidth,
-            height: contentWidth * (438 / 997),
-            fit: BoxFit.cover,
-          ),
-          Positioned.fill(
-            child: Align(
-              alignment: Alignment.bottomLeft,
-              child: Padding(
-                padding: const EdgeInsets.only(left: 14, bottom: 8),
-                child: AppText(
-                  'page.tutorial.title'.tr(),
-                  type: AppTextType.defaultBold,
+      child: InkWell(
+        onTap: () => context.push('/tutorial'),
+        child: Stack(
+          children: [
+            Image.asset(
+              'assets/images/car-charging-2.png',
+              width: contentWidth,
+              height: contentWidth * (438 / 997),
+              fit: BoxFit.cover,
+            ),
+            Positioned.fill(
+              child: Align(
+                alignment: Alignment.bottomLeft,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 14, bottom: 8),
+                  child: AppText(
+                    'page.tutorial.title'.tr(),
+                    type: AppTextType.defaultBold,
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   Widget _creditsSection() {
+    // TODO(Fase 4): quick buttons purchase directly via UserApi.createPayment
+    // (prod CreditsOptions.onCredits). Until then they open /credits.
+    void goCredits() => context.push('/credits');
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         AppText('page.credits.title'.tr()),
         const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-          decoration: BoxDecoration(
-            color: const Color(0xFF3D3D3D),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              AppText('page.home.enter-amount'.tr()),
-              const Icon(Icons.add, size: 24, color: AppColors.textLight),
-            ],
+        InkWell(
+          onTap: goCredits,
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF3D3D3D),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                AppText('page.home.enter-amount'.tr()),
+                const Icon(Icons.add, size: 24, color: AppColors.textLight),
+              ],
+            ),
           ),
         ),
         const SizedBox(height: 12),
         Row(
-          children: const [
-            CreditsButton(color: Color(0xFF5A999E), amount: 25),
-            SizedBox(width: 8),
-            CreditsButton(color: Color(0xFF36A377), amount: 50),
-            SizedBox(width: 8),
-            CreditsButton(color: Color(0xFFB1CE36), amount: 75),
+          children: [
+            CreditsButton(
+              color: const Color(0xFF5A999E),
+              amount: 25,
+              country: _country,
+              onPressed: goCredits,
+            ),
+            const SizedBox(width: 8),
+            CreditsButton(
+              color: const Color(0xFF36A377),
+              amount: 50,
+              country: _country,
+              onPressed: goCredits,
+            ),
+            const SizedBox(width: 8),
+            CreditsButton(
+              color: const Color(0xFFB1CE36),
+              amount: 75,
+              country: _country,
+              onPressed: goCredits,
+            ),
           ],
         ),
       ],

@@ -37,11 +37,11 @@ class _MainScreenState extends ConsumerState<MainScreen> {
             Expanded(
               child: IndexedStack(
                 index: _currentIndex,
-                children: const [
-                  HomeScreen(),
-                  MapScreen(),
-                  HistoryScreen(),
-                  MoreScreen(),
+                children: [
+                  const HomeScreen(),
+                  MapScreen(visible: _currentIndex == 1),
+                  const HistoryScreen(),
+                  const MoreScreen(),
                 ],
               ),
             ),
