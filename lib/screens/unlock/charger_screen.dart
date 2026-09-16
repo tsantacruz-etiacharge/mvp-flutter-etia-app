@@ -114,6 +114,17 @@ class _ChargerUnlockScreenState extends ConsumerState<ChargerUnlockScreen> {
   Future<void> _submit() async {
     final api = ref.read(apiClientProvider);
     final message = ref.read(messageProvider.notifier);
+    // Prod accepts 0h0m (backend decides); block it early with a clear error.
+    if (_hours * 60 + _minutes <= 0) {
+      message.showError('page.unlock.invalid-time'.tr());
+      return;
+    }
+    // Fully unavailable chargers fail server-side anyway (400/502);
+    // surface it immediately instead of a round trip.
+    if (_charger?.status == ChargerStatus.unavailable) {
+      message.showError('error.charger.unavailable'.tr());
+      return;
+    }
     setState(() => _submitting = true);
     try {
       await api.sessionApi.start(

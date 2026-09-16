@@ -90,6 +90,7 @@
   "page.unlock.off": "{percent}%OFF",
   "page.unlock.discount": "Descuento aplicado",
   "page.unlock.savings": "Estás ahorrando {credits} créditos",
+  "page.unlock.invalid-time": "Seleccioná un tiempo mayor a 0",
 
   "page.charger.connector": "Conector {connectorID}",
   "page.charger.available": "Disponible",

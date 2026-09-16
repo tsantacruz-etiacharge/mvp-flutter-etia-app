@@ -27,21 +27,32 @@ class ChargingScreen extends ConsumerStatefulWidget {
 }
 
 class _ChargingScreenState extends ConsumerState<ChargingScreen> {
-  Timer? _timer;
+  Timer? _clockTimer;
+  Timer? _pollTimer;
   Duration _remaining = Duration.zero;
   bool _stopping = false;
+
+  /// Last known session, kept across poll failures (prod keeps showing the
+  /// previous session and only toasts on refresh errors).
+  ChargingSession? _lastSession;
 
   @override
   void initState() {
     super.initState();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+    // 1s repaint for the countdown (no network).
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
+    });
+    // 5s session refetch, mirroring SessionContext.tsx polling.
+    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (mounted) ref.invalidate(sessionProvider);
     });
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _clockTimer?.cancel();
+    _pollTimer?.cancel();
     super.dispose();
   }
 
@@ -60,6 +71,7 @@ class _ChargingScreenState extends ConsumerState<ChargingScreen> {
   }
 
   Future<void> _stop(ChargingSession session) async {
+    if (_stopping) return;
     final message = ref.read(messageProvider.notifier);
     setState(() => _stopping = true);
     try {
@@ -68,6 +80,15 @@ class _ChargingScreenState extends ConsumerState<ChargingScreen> {
       if (!mounted) return;
       context.go('/main');
     } on DioException catch (e) {
+      final status = e.response?.statusCode;
+      if (status == 404) {
+        // Already finished remotely: nothing to stop, leave like prod
+        // would after its next poll (session null -> home).
+        ref.invalidate(sessionProvider);
+        if (!mounted) return;
+        context.go('/main');
+        return;
+      }
       message.showError(
         (e.response != null ? 'error.unexpected' : 'error.connection').tr(),
       );
@@ -117,20 +138,29 @@ class _ChargingScreenState extends ConsumerState<ChargingScreen> {
     final sessionAsync = ref.watch(sessionProvider);
 
     return sessionAsync.when(
-      loading: () => const ColoredBox(
-        color: AppColors.background,
-        child: Center(
-          child: CircularProgressIndicator(color: AppColors.primary),
-        ),
-      ),
-      error: (_, _) => const ColoredBox(color: AppColors.background),
+      loading: () => _lastSession != null
+          ? _buildContent(_lastSession!)
+          : const ColoredBox(
+              color: AppColors.background,
+              child: Center(
+                child: CircularProgressIndicator(color: AppColors.primary),
+              ),
+            ),
+      // Poll failures keep the last known session on screen instead of
+      // blanking (prod toasts and keeps the old session).
+      error: (_, _) => _lastSession != null
+          ? _buildContent(_lastSession!)
+          : const ColoredBox(color: AppColors.background),
       data: (session) {
         if (session == null) {
+          // Finished remotely (or stopped): leave, like Redirect /home.
+          _lastSession = null;
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) context.go('/main');
           });
           return const ColoredBox(color: AppColors.background);
         }
+        _lastSession = session;
         return _buildContent(session);
       },
     );

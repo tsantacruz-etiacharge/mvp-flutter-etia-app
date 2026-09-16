@@ -1,9 +1,12 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../providers/message_provider.dart';
 import '../../theme/colors.dart';
 import '../../theme/dimensions.dart';
+import '../../utils/unlock_code.dart';
 import '../../widgets/app_button.dart';
 import '../../theme/text_styles.dart';
 import '../../widgets/app_text.dart';
@@ -11,14 +14,15 @@ import '../../widgets/app_text_field.dart';
 import '../../widgets/icon_header.dart';
 import '../../widgets/screen_scroll_view.dart';
 
-class ManualUnlockScreen extends StatefulWidget {
+class ManualUnlockScreen extends ConsumerStatefulWidget {
   const ManualUnlockScreen({super.key});
 
   @override
-  State<ManualUnlockScreen> createState() => _ManualUnlockScreenState();
+  ConsumerState<ManualUnlockScreen> createState() =>
+      _ManualUnlockScreenState();
 }
 
-class _ManualUnlockScreenState extends State<ManualUnlockScreen> {
+class _ManualUnlockScreenState extends ConsumerState<ManualUnlockScreen> {
   final _controller = TextEditingController();
   bool _touched = false;
 
@@ -34,12 +38,14 @@ class _ManualUnlockScreenState extends State<ManualUnlockScreen> {
     setState(() => _touched = true);
     if (!_valid) return;
 
-    final parts = _controller.text.trim().split(';');
-    final serial = parts[0];
-    final connectorID = parts.length > 1 ? parts[1] : '1';
+    final code = parseUnlockCode(_controller.text);
+    if (code == null) {
+      ref.read(messageProvider.notifier).showError('error.invalid-code'.tr());
+      return;
+    }
 
     context.replace(
-      '/unlock/charger?serial=${Uri.encodeComponent(serial)}&connectorID=${Uri.encodeComponent(connectorID)}',
+      '/unlock/charger?serial=${Uri.encodeComponent(code.serial)}&connectorID=${code.connectorID}',
     );
   }
 

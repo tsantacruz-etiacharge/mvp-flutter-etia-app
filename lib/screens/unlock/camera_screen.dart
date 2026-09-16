@@ -2,25 +2,29 @@ import 'dart:async';
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../../providers/message_provider.dart';
 import '../../theme/colors.dart';
 import '../../theme/dimensions.dart';
+import '../../utils/unlock_code.dart';
 import '../../widgets/app_button.dart';
 import '../../theme/text_styles.dart';
 import '../../widgets/app_text.dart';
 import '../../widgets/screen_view.dart';
 import '../../widgets/themed_modal.dart';
 
-class CameraUnlockScreen extends StatefulWidget {
+class CameraUnlockScreen extends ConsumerStatefulWidget {
   const CameraUnlockScreen({super.key});
 
   @override
-  State<CameraUnlockScreen> createState() => _CameraUnlockScreenState();
+  ConsumerState<CameraUnlockScreen> createState() =>
+      _CameraUnlockScreenState();
 }
 
-class _CameraUnlockScreenState extends State<CameraUnlockScreen> {
+class _CameraUnlockScreenState extends ConsumerState<CameraUnlockScreen> {
   final _controller = MobileScannerController(
     formats: const [BarcodeFormat.qrCode],
     detectionSpeed: DetectionSpeed.noDuplicates,
@@ -30,6 +34,7 @@ class _CameraUnlockScreenState extends State<CameraUnlockScreen> {
   bool _flashlight = false;
   bool _handled = false;
   Timer? _timer;
+  Timer? _rescanTimer;
 
   @override
   void initState() {
@@ -42,6 +47,7 @@ class _CameraUnlockScreenState extends State<CameraUnlockScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _rescanTimer?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -52,12 +58,20 @@ class _CameraUnlockScreenState extends State<CameraUnlockScreen> {
     if (raw == null || raw.isEmpty) return;
     _handled = true;
 
-    final parts = raw.split(';');
-    final serial = parts[0];
-    final connectorID = parts.length > 1 ? parts[1] : '1';
+    // Prod navigates blindly; a garbage QR then 404s on the charger screen.
+    // Validate first so the user can rescan immediately.
+    final code = parseUnlockCode(raw);
+    if (code == null) {
+      ref.read(messageProvider.notifier).showError('error.invalid-code'.tr());
+      _rescanTimer?.cancel();
+      _rescanTimer = Timer(const Duration(milliseconds: 1500), () {
+        _handled = false;
+      });
+      return;
+    }
 
     context.replace(
-      '/unlock/charger?serial=${Uri.encodeComponent(serial)}&connectorID=${Uri.encodeComponent(connectorID)}',
+      '/unlock/charger?serial=${Uri.encodeComponent(code.serial)}&connectorID=${code.connectorID}',
     );
   }
 
