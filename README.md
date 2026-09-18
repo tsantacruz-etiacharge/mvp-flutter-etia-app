@@ -1,7 +1,9 @@
 # ETIA User App — Flutter
 
 Cliente Flutter de la app ETIA. Paridad funcional con `etia-user-app` (Expo React Native, producción).
-Backend REST compartido. Pagos: Mercado Pago Checkout Pro vía backend (`POST {user}/credits → {url}`).
+Backend REST compartido. Pagos con tarjeta: SDK nativo de Mercado Pago
+(CoreMethods) vía `MethodChannel`, portado de `prueba-flutter-MP`
+(`lib/services/mercado_pago_channel.dart`, pantalla `/payment/card`).
 
 ## Requisitos
 
@@ -83,5 +85,7 @@ ios/Flutter/
 ## Estado de la migración
 
 Ver auditoría inicial: pantallas/auth/mapa/unlock/historial/perfil conectados al backend real.
-Pendiente: `complete-profile`, `force-update`, `CountryApi`, compra de créditos/MP (Fases 1 y 4),
+Pago con tarjeta in-app (tokenización CoreMethods) integrado desde `prueba-flutter-MP`.
+Pendiente: `CountryApi` ya lista (Fase 1) — falta acreditar créditos con el
+token en backend (`POST /v1/payments`, fuera del alcance de la app),
 polling de carga, hardening de release (signing, flavors `.dev`/`.prev`, ofuscación).

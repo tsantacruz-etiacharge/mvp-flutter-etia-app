@@ -29,6 +29,10 @@ target 'Runner' do
   use_frameworks!
   use_modular_headers!
 
+  # Mercado Pago card tokenization (same as prueba-flutter-MP).
+  # NOTE: requires `pod install` on macOS; Podfile.lock must then be committed.
+  pod 'MercadoPagoSDKCoreMethods', :git => 'https://github.com/mercadopago/sdk-ios.git'
+
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
 end
 

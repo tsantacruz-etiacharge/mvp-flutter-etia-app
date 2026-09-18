@@ -148,6 +148,18 @@ class _CreditsScreenState extends State<CreditsScreen> {
               color: AppColors.textDark,
             ),
           ),
+          const SizedBox(height: 12),
+          AppButton(
+            type: AppButtonType.secondary,
+            onPressed: _credits == null
+                ? null
+                : () => context.push('/payment/card?credits=$_credits'),
+            disabled: _credits == null,
+            child: AppText(
+              'page.payment.card.pay'.tr(),
+              type: AppTextType.subtitle,
+            ),
+          ),
         ],
       ),
     );

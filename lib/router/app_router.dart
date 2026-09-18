@@ -24,6 +24,7 @@ import '../screens/more/about_screen.dart';
 import '../screens/more/edit_profile_screen.dart';
 import '../screens/more/change_password_screen.dart';
 import '../screens/complete_profile_screen.dart';
+import '../screens/card_payment_screen.dart';
 import '../screens/force_update_screen.dart';
 import '../screens/tutorial_screen.dart';
 import '../screens/credits_screen.dart';
@@ -60,6 +61,7 @@ const _signedInRoutes = <String>{
   '/charging',
   '/tutorial',
   '/credits',
+  '/payment/card',
   '/home/benefit-detail',
   '/home/enter-dni',
   '/unlock/charger',
@@ -222,6 +224,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/credits',
         builder: (context, state) => const CreditsScreen(),
+      ),
+      GoRoute(
+        path: '/payment/card',
+        builder: (context, state) => CardPaymentScreen(
+          credits:
+              int.tryParse(state.uri.queryParameters['credits'] ?? '') ?? 0,
+        ),
       ),
       GoRoute(
         path: '/home/benefit-detail',

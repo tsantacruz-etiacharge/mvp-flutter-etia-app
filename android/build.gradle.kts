@@ -2,6 +2,8 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        // Mercado Pago Android SDK (same as prueba-flutter-MP).
+        maven { url = uri("https://artifacts.mercadolibre.com/repository/android-releases") }
     }
 }
 

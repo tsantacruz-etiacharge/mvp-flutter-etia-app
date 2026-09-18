@@ -91,6 +91,12 @@
   "page.unlock.discount": "Descuento aplicado",
   "page.unlock.savings": "Estás ahorrando {credits} créditos",
   "page.unlock.invalid-time": "Seleccioná un tiempo mayor a 0",
+  "page.payment.card.title": "Pagar con tarjeta",
+  "page.payment.card.pay": "Pagar con tarjeta",
+  "page.payment.card.success": "Tarjeta verificada correctamente. La acreditación de créditos se habilita con el backend.",
+  "page.payment.card.error": "No se pudo verificar la tarjeta",
+  "page.payment.card.cancelled": "Pago cancelado",
+  "page.payment.card.no-key": "Falta configurar MP_PUBLIC_KEY",
 
   "page.charger.connector": "Conector {connectorID}",
   "page.charger.available": "Disponible",

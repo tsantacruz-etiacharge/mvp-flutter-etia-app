@@ -91,6 +91,12 @@
   "page.unlock.discount": "Remise appliquée",
   "page.unlock.savings": "Vous économisez {credits} crédits",
   "page.unlock.invalid-time": "Sélectionnez une durée supérieure à 0",
+  "page.payment.card.title": "Payer par carte",
+  "page.payment.card.pay": "Payer par carte",
+  "page.payment.card.success": "Carte vérifiée avec succès. Le crédit nécessite le backend.",
+  "page.payment.card.error": "Impossible de vérifier la carte",
+  "page.payment.card.cancelled": "Paiement annulé",
+  "page.payment.card.no-key": "MP_PUBLIC_KEY non configuré",
 
   "page.charger.connector": "Connecteur {connectorID}",
   "page.charger.available": "Disponible",

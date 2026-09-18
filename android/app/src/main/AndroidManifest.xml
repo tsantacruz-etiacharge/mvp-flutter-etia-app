@@ -33,6 +33,12 @@
                 <data android:scheme="${APP_SCHEME}" android:host="payment-result"/>
             </intent-filter>
         </activity>
+        <!-- Mercado Pago native card form (internal only). Framework theme:
+             the app has no AppCompat dependency, unlike prueba-flutter-MP. -->
+        <activity
+            android:name=".MercadoPagoCardActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />

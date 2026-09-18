@@ -91,6 +91,12 @@
   "page.unlock.discount": "Discount applied",
   "page.unlock.savings": "You're saving {credits} credits",
   "page.unlock.invalid-time": "Select a time greater than 0",
+  "page.payment.card.title": "Pay with card",
+  "page.payment.card.pay": "Pay with card",
+  "page.payment.card.success": "Card verified successfully. Crediting requires the backend step.",
+  "page.payment.card.error": "Could not verify the card",
+  "page.payment.card.cancelled": "Payment cancelled",
+  "page.payment.card.no-key": "MP_PUBLIC_KEY is not configured",
 
   "page.charger.connector": "Connector {connectorID}",
   "page.charger.available": "Available",
